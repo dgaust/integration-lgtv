@@ -305,7 +305,10 @@ class LGDevice:
         self._sources = {}
         self._unique_id: str | None = None
         self._supported_features = LG_FEATURES
-        self._paused = False
+        # True = nothing is known to be playing, so play/pause starts with play. Apps that don't
+        # report a play state to webOS (e.g. Plex) rely on this; see play_pause().
+        self._paused = True
+        self._paused_app_id: str | None = None
         self._media_type = MediaType.VIDEO
         self._media_title = ""
         self._media_image_url = ""
@@ -561,12 +564,20 @@ class LGDevice:
 
         async def _on_state_changed(state: WebOsTvState):
             """State changed callback."""
-            if state.media_state:
+            if state.media_state is not None:
+                # Keep empty reports too: otherwise the last "playing"/"paused" stays forever
+                # after playback ends, and play/pause acts on it.
                 self._media_state = state.media_state
                 if self.media_state:
                     self._paused = (
-                        self.media_state.get(LG_PLAYSTATE, "playing") == "paused"
+                        self.media_state.get(LG_PLAYSTATE, "playing") != "playing"
                     )
+            app_id = getattr(state, "current_app_id", None)
+            if app_id != self._paused_app_id:
+                # A different app is in front: nothing of its own is known to be playing yet.
+                self._paused_app_id = app_id
+                if not self.media_state:
+                    self._paused = True
             await self._update_states(self._tv)
             if not state.power_state:
                 self._attr_state = States.OFF
@@ -1155,7 +1166,8 @@ class LGDevice:
 
     def reset(self):
         """Reset values."""
-        self._paused = False
+        self._paused = True
+        self._paused_app_id = None
         self._media_state = None
 
     async def disconnect(self):
@@ -1714,14 +1726,23 @@ class LGDevice:
 
     @retry()
     async def play_pause(self) -> ucapi.StatusCodes:
-        """Send toggle-play-pause command to LG TV."""
-        if self._paused or (
-            self.media_state
-            and self.media_state.get(LG_PLAYSTATE, "playing") == "paused"
-        ):
-            await self.media_play()
+        """
+        Send toggle-play-pause command to LG TV.
+
+        When webOS reports the foreground app's play state, pause only if it is playing.
+        Some apps (e.g. Plex) report nothing; then the integration's own record of what it
+        last sent decides, starting from "nothing playing" (set on connect and whenever the
+        foreground app changes), so the first press from an app's home screen plays.
+        """
+        reported = self.media_state.get(LG_PLAYSTATE) if self.media_state else None
+        if reported is not None:
+            playing = reported == "playing"
         else:
+            playing = not self._paused
+        if playing:
             await self.media_pause()
+        else:
+            await self.media_play()
         return ucapi.StatusCodes.OK
 
     @retry()
