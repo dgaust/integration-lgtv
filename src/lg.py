@@ -903,14 +903,28 @@ class LGDevice:
         except RuntimeError:
             pass
 
+    @staticmethod
+    def _picture_modes_for_generation(generation: str) -> list[str]:
+        """
+        Picture modes for a model generation such as "C9" or "B9".
+
+        Only some series are listed. Other series from the same year share the same webOS
+        release and picture modes (e.g. a B9 has the C9's), so fall back to the C- then
+        G-series of that year before the newest generation; otherwise a 2019 TV would be
+        offered 2025 modes it doesn't have, which can't be selected.
+        """
+        year = generation[1:]
+        for candidate in (generation, f"C{year}", f"G{year}"):
+            if candidate in LG_PICTURE_MODES_GENERATION:
+                return LG_PICTURE_MODES_GENERATION[candidate]
+        return LG_PICTURE_MODES_GENERATION[DEFAULT_PICTURE_MODE]
+
     def _update_picture_modes(self) -> None:
         if not self._picture_modes and (generation := self.model_version):
             _LOG.debug(
                 "[%s] LG model found : %s", self._device_config.address, generation
             )
-            modes = LG_PICTURE_MODES_GENERATION.get(generation, None)
-            if modes is None:
-                modes = LG_PICTURE_MODES_GENERATION[DEFAULT_PICTURE_MODE]
+            modes = self._picture_modes_for_generation(generation)
             self._picture_modes = {}
             for mode in modes:
                 self._picture_modes[self._picture_mode_name(mode)] = mode
