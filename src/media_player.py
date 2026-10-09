@@ -176,6 +176,8 @@ class LGTVMediaPlayer(MediaPlayer, LGEntity):
                 return await self._device.button("DASH")
             case Commands.MY_RECORDINGS:
                 return await self._device.button("LIST")
+            case Commands.STOP:
+                return await self._device.stop()
             case Commands.FAST_FORWARD:
                 return await self._device.button("FASTFORWARD")
             case Commands.REWIND:
